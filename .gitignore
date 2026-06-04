@@ -1,0 +1,14 @@
+# Caches
+__pycache__/
+*.pyc
+
+# Large data (not tracked)
+processed_vggsound/
+processed_vggsound_testing/
+
+# Vendored third-party (has its own .git)
+ImageBind/
+third_party/ImageBind/
+
+# Model checkpoints (large binaries)
+*.pth
