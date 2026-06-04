@@ -1,51 +1,28 @@
-"""Embedding-space analysis (separate from retrieval evaluation).
+"""Embedding-space analysis: cluster quality + direct alignment.
 
-Computes, for the teacher and student embedding spaces:
   - Cluster quality by class label: Silhouette + Davies-Bouldin
   - PCA and t-SNE 2-D visualizations (saved as PNGs)
   - Direct alignment: per-clip cosine(query_i, teacher_target_i)
-
-Data loading / query extraction is reused from evaluate_recall.py so this file
-stays purely about analysis and never duplicates the encoding logic.
 """
 
 import os
 import numpy as np
-import torch
 
-from imagebind.models import imagebind_model
-
-from NaiveLateMLPFusion.model.naive_implementation import NaiveLateFusionMLP
-from train_mlp import CLIPEncoder, ASTEncoder
-
-from evaluate_recall import (
-    gather_test_records,
-    load_gallery,
-    extract_teacher_queries,
-    extract_mlp_student_queries,
-)
+from avea.utils import l2_normalize
 
 
 # ---------------------------------------------------------------------------
-# Cluster quality: how semantically organized is each embedding space?
-# (model-agnostic; works on teacher queries, student queries, or the gallery)
+# Cluster quality
 # ---------------------------------------------------------------------------
-
-def _l2_normalize(X):
-    X = np.asarray(X, dtype=np.float32)
-    norms = np.linalg.norm(X, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    return X / norms
-
 
 def compute_cluster_metrics(embeddings, labels, name=""):
     """Silhouette (higher = tighter, better-separated same-class clusters) and
     Davies-Bouldin (lower = better). Embeddings are L2-normalized first so the
-    Euclidean geometry both metrics use matches the cosine space retrieval uses."""
+    Euclidean geometry both metrics use matches the cosine retrieval space."""
 
     from sklearn.metrics import silhouette_score, davies_bouldin_score
 
-    X = _l2_normalize(embeddings)
+    X = l2_normalize(embeddings)
     y = np.asarray(labels)
 
     if len(set(y.tolist())) < 2:
@@ -70,7 +47,7 @@ def plot_embedding_space(embeddings, labels, name, save_path, method="pca",
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    X = _l2_normalize(embeddings)
+    X = l2_normalize(embeddings)
     y = np.asarray(labels)
 
     # Subsample for legibility / t-SNE speed.
@@ -132,7 +109,6 @@ def analyze_embedding_space(embeddings, labels, name, prefix):
 
 # ---------------------------------------------------------------------------
 # Direct alignment: how close is each query to ITS OWN privileged target?
-# No gallery, no ranking, no retrieval -- just the diagonal cosine.
 # ---------------------------------------------------------------------------
 
 def compute_direct_alignment(Q, G, name=""):
@@ -188,84 +164,3 @@ def analyze_direct_alignment(Q, G, name, save_path):
     except Exception as e:
         print(f"[plot] alignment histogram failed for {name}: {e}")
     return result
-
-
-def main():
-
-    device = (
-        "cuda"
-        if torch.cuda.is_available()
-        else "cpu"
-    )
-
-    root_dir = "/home/uasdtu/audio_visual_embedding_approximation/processed_vggsound"
-    student_ckpt = "best_mlp_epoch19.pth"
-
-    # Shared data + gallery (built once, reused by teacher and student).
-    records = gather_test_records(root_dir)
-    G, gallery_labels, clip_ids = load_gallery(records)
-
-    results = {}
-
-    # ---- Teacher ----
-    imagebind_model_instance = imagebind_model.imagebind_huge(pretrained=True)
-    imagebind_model_instance.eval()
-    imagebind_model_instance.to(device)
-
-    Q_teacher = extract_teacher_queries(records, imagebind_model_instance, device)
-    results["teacher"] = {
-        "cluster": analyze_embedding_space(
-            Q_teacher.numpy(), gallery_labels, "TEACHER", "clusters_teacher"
-        ),
-        "alignment": analyze_direct_alignment(
-            Q_teacher, G, "TEACHER", "alignment_teacher_hist.png"
-        ),
-    }
-
-    # ---- Student (trained MLP) ----
-    if os.path.exists(student_ckpt):
-        clip_encoder = CLIPEncoder().to(device)
-        ast_encoder = ASTEncoder().to(device)
-        clip_encoder.eval()
-        ast_encoder.eval()
-
-        mlp = NaiveLateFusionMLP().to(device)
-        mlp.load_state_dict(torch.load(student_ckpt, map_location=device))
-        mlp.eval()
-
-        Q_student = extract_mlp_student_queries(records, clip_encoder, ast_encoder, mlp, device)
-        results["student"] = {
-            "cluster": analyze_embedding_space(
-                Q_student.numpy(), gallery_labels, "STUDENT", "clusters_student"
-            ),
-            "alignment": analyze_direct_alignment(
-                Q_student, G, "STUDENT", "alignment_student_hist.png"
-            ),
-        }
-    else:
-        print(f"\n[skip] student checkpoint not found: {student_ckpt}")
-
-    print("\n================ SUMMARY ================")
-    for model_name, res in results.items():
-        print(f"\n{model_name.upper()}")
-        if res.get("cluster"):
-            print(f"  cluster : {res['cluster']}")
-        if res.get("alignment"):
-            print(f"  align   : {res['alignment']['stats']}")
-
-    # Direct test of the hypothesis: is the student space more semantically organized?
-    t = results.get("teacher", {}).get("cluster")
-    s = results.get("student", {}).get("cluster")
-    if t and s:
-        print("\n--- Cluster quality: STUDENT vs TEACHER ---")
-        print(f"Silhouette   : student {s['silhouette']:.4f}  vs  teacher {t['silhouette']:.4f}")
-        print(f"Davies-Bouldin: student {s['davies_bouldin']:.4f}  vs  teacher {t['davies_bouldin']:.4f}")
-        tighter = s["silhouette"] > t["silhouette"] and s["davies_bouldin"] < t["davies_bouldin"]
-        if tighter:
-            print("=> Student forms tighter same-class clusters: more semantically organized.")
-        else:
-            print("=> Student does NOT clearly beat the teacher on both metrics.")
-
-
-if __name__ == "__main__":
-    main()
