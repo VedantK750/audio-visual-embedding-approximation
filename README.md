@@ -116,6 +116,148 @@ python3 scripts/analyze_embeddings.py # cluster quality + PCA/t-SNE + alignment 
 
 ---
 
+## Findings & analysis
+
+A running lab-notebook of what I tried, why, and how I read the results. All
+retrieval numbers are on the VGGSound **test** split (628 clips). Unless stated
+otherwise, the gallery is the *privileged* teacher embedding — ImageBind run on
+**5 frames (mean-pooled) ‖ audio**, 2048-d — and everything is compared with
+cosine similarity.
+
+### 1. First, is the teacher target even hard to hit?
+
+Before training any student I wanted to know what I was aiming at. The teacher
+target pools 5 frames, but encoding 5 frames per clip at train time is expensive,
+so I asked: *how much do those extra frames actually buy?* I queried the gallery
+with a much cheaper representation — **a single middle frame + audio** through
+ImageBind — and the result was almost suspicious:
+
+- Middle frame + audio → **R@1 ≈ 100%**
+- Middle frame, **vision only (no audio)** → **R@1 ≈ 99.7%**
+
+So a single representative frame already reconstructs the 5-frame teacher
+embedding almost perfectly for this dataset. Temporal aggregation over 5 frames
+adds very little discriminative information in ImageBind's space for VGGSound.
+That reframed the whole problem: **the student's job is not to approximate a
+multi-frame representation — it's to learn a good mapping from the CLIP/AST (and
+later SigLIP/CLAP) feature spaces into the ImageBind latent space** while keeping
+semantic structure intact. The single-frame choice for the students is therefore
+fair, not a handicap.
+
+### 2. The MLP student, and the asymmetry that makes the numbers make sense
+
+It's worth being explicit about who plays which role, because the evaluation is
+deliberately asymmetric:
+
+```
+Gallery (ground truth):   5 frames + audio  → ImageBind → 2048-d   (privileged target space)
+Teacher query:            1 frame  + audio  → ImageBind → 2048-d
+Student query:            CLIP + AST        → MLP       → 2048-d
+```
+
+Both queries are scored against the **same** ImageBind gallery. The student only
+knows *where to land* because it was trained to mimic the 5-frame+audio teacher —
+ImageBind is still doing the heavy lifting; the student is learning to point into
+its space.
+
+| Model (query) | Inst R@1 | Inst R@5 | Inst R@10 | Inst MedR | Sem R@1 | Sem R@5 | Sem R@10 | Sem MedR |
+|---|---|---|---|---|---|---|---|---|
+| Teacher (1 frame + audio) | **100.0** | 100.0 | 100.0 | 1 | 80.10 | 94.43 | 96.66 | 1 |
+| MLP student (CLIP + AST)  | 31.53 | 63.85 | 81.05 | 3 | **81.53** | 93.47 | 96.97 | 1 |
+
+The headline is the split: the student's **instance** retrieval collapses
+(100 → 31.5 R@1), but its **semantic** retrieval actually *matches or slightly
+beats* the teacher (80.1 → 81.5 R@1). My reading: the student is trained to
+regress toward privileged targets across thousands of examples, so it learns a
+**smoother** representation that throws away a lot of clip-specific detail (hence
+weak exact-instance matching) while preserving — even sharpening — class-level
+semantics. The qualitative dumps back this up: when the student misses the exact
+clip, its top hits are almost always the *right class*.
+
+Two more measurements support "sharpened, not just copied":
+
+- **Cluster tightness (silhouette, by class label):** teacher query **0.093** →
+  MLP student **0.179**. The student's same-class clusters are tighter / better
+  separated than the teacher *query* space.
+- **Direct alignment:** mean cosine between a student embedding and its own
+  teacher target is only **0.71** — so the student is *not* faithfully
+  reproducing each target vector, yet still lands close enough to the right
+  semantic neighborhood to retrieve well.
+
+**What I can claim:** the student learned a representation that is *more
+class-consistent than the teacher's 1-frame+audio query representation* when both
+are judged inside ImageBind's privileged gallery.
+
+**What I cannot claim:** that the student "beat ImageBind." It wins *inside
+ImageBind's world* — swap the gallery for a CLIP space or anything else and the
+result could flip. The retrieval win is gallery-relative, not absolute.
+
+### 3. Does that smoothing cost class information? (downstream linear probe)
+
+Retrieval rankings depend on the gallery, so I wanted a gallery-free check:
+freeze the embeddings, train a logistic-regression probe on the train split,
+score on test.
+
+| Space | Top-1 acc | macro-F1 |
+|---|---|---|
+| Teacher query (1 frame + audio) | 84.39% | 0.8448 |
+| MLP student (CLIP + AST)        | 84.08% | 0.8446 |
+
+Essentially **tied**. So despite only 0.71 cosine to the targets, the student
+retained virtually all of the *linearly decodable* class information the teacher
+query carries. The smoothing in §2 isn't destroying class content — it's
+reorganizing it. (And note: a near-tie on the probe is the honest counterweight
+to the retrieval "win" — it's further evidence the student didn't surpass the
+teacher in any absolute sense.)
+
+### 4. The SigLIP 2 + CLAP transformer student — the upgrade that hasn't paid off (yet)
+
+The natural next step was stronger encoders (SigLIP 2 vision, LAION-CLAP audio)
+and a real fusion mechanism (bi-directional cross-attention) instead of a plain
+concat-MLP. I precomputed those features and trained `CrossAttentionStudent`.
+Honestly, it did **worse**, not better:
+
+| Model (query) | Inst R@1 | Inst R@5 | Inst R@10 | Inst MedR | Sem R@1 | Sem R@5 | Sem R@10 | Sem MedR |
+|---|---|---|---|---|---|---|---|---|
+| MLP student          | 31.53 | 63.85 | 81.05 | 3 | 81.53 | 93.47 | 96.97 | 1 |
+| Transformer student  | 14.49 | 41.56 | 57.48 | 8 | 75.48 | 88.06 | 91.88 | 1 |
+
+Instance R@1 roughly halved and semantic R@1 dropped ~6 points. The semantic
+behavior is still "right class even when the instance is wrong," so it learned
+*something* sensible — it just landed less precisely. I don't have a confirmed
+cause yet, but my working hypotheses, roughly in order of suspicion:
+
+1. **The cross-attention is barely attending.** Each modality is a *single*
+   token, so the attention softmax is over one key — effectively the identity.
+   The "bi-directional cross-attention" is closer to a learned linear fusion than
+   real attention, and may be harder to optimize than the simple concat-MLP.
+2. **Geometry mismatch.** SigLIP 2 and CLAP live in their own spaces that may be
+   farther from ImageBind's than CLIP/AST were, making the regression harder.
+3. **Under-tuned.** It early-stopped at epoch 15 with no real hyperparameter
+   search (same `α=10, β=1`, lr `1e-3` as the MLP). Capacity, lr, and the
+   loss weighting are all untouched knobs.
+
+So for now the **plain MLP is the stronger student**, which is itself a useful
+(if humbling) result: a richer architecture + newer encoders is not automatically
+better at this distillation task. Cluster, alignment, and downstream-probe
+numbers for the transformer are the obvious next measurements (the probe is
+already wired into `eval_downstream.py`).
+
+### Summary of the story
+
+- The 5-frame teacher target is *easy* to hit from one frame → the real task is
+  the CLIP/AST → ImageBind mapping, not temporal modeling.
+- The MLP student trades **instance fidelity** (31.5 R@1) for a **smoother, more
+  class-consistent** space (81.5 semantic R@1, silhouette 0.093 → 0.179) that is
+  downstream-equivalent to the teacher query (84.1 vs 84.4 probe).
+- Those wins are **relative to ImageBind's gallery**, not proof of beating
+  ImageBind.
+- The fancier SigLIP/CLAP cross-attention student currently *under*performs the
+  MLP — an open thread, likely architecture/tuning rather than the encoders
+  themselves.
+
+---
+
 ## Notes
 
 - Checkpoints are referenced by fixed names in the eval scripts
