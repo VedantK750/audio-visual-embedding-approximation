@@ -13,18 +13,21 @@ from imagebind.models import imagebind_model
 from avea.encoders import CLIPEncoder, ASTEncoder
 from avea.models.mlp_fusion import NaiveLateFusionMLP
 from avea.models.transformer_fusion import CrossAttentionStudent
+from avea.models.multitoken_fusion import MultiTokenFusionTransformer
 from avea.eval.extraction import (
     gather_test_records,
     load_gallery,
     extract_teacher_queries,
     extract_mlp_student_queries,
     extract_transformer_student_queries,
+    extract_multitoken_student_queries,
 )
 from avea.eval.retrieval import evaluate_retrieval
 
 DATA_ROOT = "processed_vggsound"
 MLP_CKPT = "checkpoints/mlp/best_mlp_epoch19.pth"
 TRANSFORMER_CKPT = "checkpoints/transformer/best_transformer_epoch15.pth"
+MULTITOKEN_CKPT = "checkpoints/multitoken/best_multitoken_epoch11.pth"
 
 
 def main():
@@ -81,6 +84,24 @@ def main():
         results["transformer_student"] = evaluate_retrieval(
             Q_tr, G, gallery_labels, gallery_labels, clip_ids,
             name=f"TRANSFORMER STUDENT ({TRANSFORMER_CKPT})"
+        )
+
+    # ---- Multi-token student (precomputed SigLIP2/CLAP token seqs -> MultiTokenFusionTransformer) ----
+    tokens_dir = os.path.join(DATA_ROOT, "test", "siglip2_tokens")
+    if not os.path.exists(MULTITOKEN_CKPT):
+        print(f"\n[skip] multi-token checkpoint not found: {MULTITOKEN_CKPT}")
+    elif not os.path.isdir(tokens_dir):
+        print(f"\n[skip] precomputed token features missing: {tokens_dir} "
+              f"(run scripts/precompute_tokens.py)")
+    else:
+        multitoken = MultiTokenFusionTransformer().to(device)
+        multitoken.load_state_dict(torch.load(MULTITOKEN_CKPT, map_location=device))
+        multitoken.eval()
+
+        Q_mt = extract_multitoken_student_queries(records, multitoken, device)
+        results["multitoken_student"] = evaluate_retrieval(
+            Q_mt, G, gallery_labels, gallery_labels, clip_ids,
+            name=f"MULTITOKEN STUDENT ({MULTITOKEN_CKPT})"
         )
 
     print("\n================ SUMMARY ================")

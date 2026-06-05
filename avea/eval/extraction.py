@@ -137,10 +137,17 @@ def extract_mlp_student_queries(records, clip_encoder, ast_encoder, mlp, device,
 
 
 def _precomputed_feature_paths(teacher_path):
-    """Map a clip's teacher_embeddings path to its precomputed student-feature
+    """Map a clip's teacher_embeddings path to its precomputed pooled student-feature
     paths (same <split>/<label>/<clip_id>.npy layout, different top dir)."""
     visual_path = teacher_path.replace("teacher_embeddings", "siglip2_embeddings")
     audio_path = teacher_path.replace("teacher_embeddings", "clap_embeddings")
+    return visual_path, audio_path
+
+
+def _precomputed_token_paths(teacher_path):
+    """Map a clip's teacher_embeddings path to its precomputed multi-token paths."""
+    visual_path = teacher_path.replace("teacher_embeddings", "siglip2_tokens")
+    audio_path = teacher_path.replace("teacher_embeddings", "clap_tokens")
     return visual_path, audio_path
 
 
@@ -165,6 +172,34 @@ def extract_transformer_student_queries(records, model, device, batch_size=64):
 
         visual = torch.stack(visual).to(device)
         audio = torch.stack(audio).to(device)
+        pred = model(visual, audio)
+
+        queries.append(pred.cpu())
+
+    return torch.cat(queries, dim=0)
+
+
+@torch.no_grad()
+def extract_multitoken_student_queries(records, model, device, batch_size=64):
+    """MultiTokenFusionTransformer: load the precomputed SigLIP 2 frame-token
+    [Nv, 768] and CLAP audio-token [Na, 512] sequences and run the model -> [N, 2048].
+    Requires scripts/precompute_tokens.py to have been run for this split."""
+
+    model.eval()
+
+    queries = []
+    for start in tqdm(range(0, len(records), batch_size), desc="Multi-token student queries"):
+        batch = records[start:start + batch_size]
+
+        visual = []
+        audio = []
+        for r in batch:
+            visual_path, audio_path = _precomputed_token_paths(r["teacher_path"])
+            visual.append(torch.from_numpy(np.load(visual_path)).float())
+            audio.append(torch.from_numpy(np.load(audio_path)).float())
+
+        visual = torch.stack(visual).to(device)   # [B, Nv, 768]
+        audio = torch.stack(audio).to(device)     # [B, Na, 512]
         pred = model(visual, audio)
 
         queries.append(pred.cpu())

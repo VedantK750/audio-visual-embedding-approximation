@@ -1,4 +1,4 @@
-"""Embedding-space analysis for the teacher and MLP student spaces:
+"""Embedding-space analysis for the teacher, MLP, and multi-token student spaces:
 cluster quality (Silhouette + Davies-Bouldin), PCA/t-SNE plots, and per-clip
 direct alignment to the teacher target.
 """
@@ -14,16 +14,19 @@ from imagebind.models import imagebind_model
 
 from avea.encoders import CLIPEncoder, ASTEncoder
 from avea.models.mlp_fusion import NaiveLateFusionMLP
+from avea.models.multitoken_fusion import MultiTokenFusionTransformer
 from avea.eval.extraction import (
     gather_test_records,
     load_gallery,
     extract_teacher_queries,
     extract_mlp_student_queries,
+    extract_multitoken_student_queries,
 )
 from avea.eval.cluster_alignment import analyze_embedding_space, analyze_direct_alignment
 
 DATA_ROOT = "processed_vggsound"
 MLP_CKPT = "checkpoints/mlp/best_mlp_epoch19.pth"
+MULTITOKEN_CKPT = "checkpoints/multitoken/best_multitoken_epoch11.pth"
 OUT_DIR = "outputs"
 
 
@@ -74,6 +77,28 @@ def main():
         }
     else:
         print(f"\n[skip] MLP student checkpoint not found: {MLP_CKPT}")
+
+    # ---- Multi-token student (precomputed SigLIP2/CLAP token seqs) ----
+    tokens_dir = os.path.join(DATA_ROOT, "test", "siglip2_tokens")
+    if not os.path.exists(MULTITOKEN_CKPT):
+        print(f"\n[skip] multi-token checkpoint not found: {MULTITOKEN_CKPT}")
+    elif not os.path.isdir(tokens_dir):
+        print(f"\n[skip] precomputed token features missing: {tokens_dir} "
+              f"(run scripts/precompute_tokens.py)")
+    else:
+        multitoken = MultiTokenFusionTransformer().to(device)
+        multitoken.load_state_dict(torch.load(MULTITOKEN_CKPT, map_location=device))
+        multitoken.eval()
+
+        Q_mt = extract_multitoken_student_queries(records, multitoken, device)
+        results["multitoken_student"] = {
+            "cluster": analyze_embedding_space(
+                Q_mt.numpy(), gallery_labels, "MULTITOKEN", f"{OUT_DIR}/clusters_multitoken"
+            ),
+            "alignment": analyze_direct_alignment(
+                Q_mt, G, "MULTITOKEN", f"{OUT_DIR}/alignment_multitoken_hist.png"
+            ),
+        }
 
     print("\n================ SUMMARY ================")
     for model_name, res in results.items():
