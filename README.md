@@ -102,14 +102,37 @@ clap_tokens/<label>/<clip_id>.npy           # [5, 512] per-window CLAP tokens
 Requires Python 3.13 with PyTorch (CUDA), and:
 
 ```bash
-pip install 'transformers>=4.49,<5' torchaudio scikit-learn matplotlib tqdm pillow numpy pandas
+pip install 'transformers>=4.49,<5' torchaudio scikit-learn matplotlib tqdm pillow numpy pandas yt-dlp
 ```
 
-`imagebind` is expected to be importable (installed in your environment); the
-`third_party/ImageBind/` clone is kept for reference only and is not on the import path.
+- **`yt-dlp`** is required by `scripts/preprocess_videos.py` to scrape the VGGSound
+  clips from YouTube. `ffmpeg` must also be available on the system PATH for frame
+  and audio extraction.
+- **`vggsound.csv`** (the official VGGSound index) must be in the project root;
+  `scripts/sample_dataset.py` reads it to build the subset.
+- `imagebind` is expected to be importable (installed in your environment); the
+  `third_party/ImageBind/` clone is kept for reference only and is not on the import path.
 
 The `scripts/` use a 2-line bootstrap so `import avea` resolves, so **run them from
 the repository root** so the relative `processed_vggsound` path is found.
+
+### Pretrained checkpoints
+
+Trained student/teacher checkpoints are available on Google Drive:
+<https://drive.google.com/drive/folders/1G9wBBS0ewd99Gir-yrj8v1IC6It1vYyT?usp=sharing>
+
+| File | Model |
+|---|---|
+| `best_mlp_epoch19.pth` | MLP student |
+| `best_transformer_epoch15.pth` | cross-attention student (failed design) |
+| `best_multitoken_epoch29_label_aware_infonce.pth` | multi-token student, label-aware InfoNCE (**reported / final**) |
+| `best_multitoken_epoch29_non_label_aware_ckpt.pth` | multi-token, plain InfoNCE (ablation) |
+| `best_multitoken_epoch16_val_loss_based.pth` | multi-token, val-loss selection (early ablation) |
+
+Place them under `checkpoints/{mlp,transformer,multitoken}/`. The eval scripts read
+fixed checkpoint names from constants at the top (`MLP_CKPT`, `TRANSFORMER_CKPT`,
+`MULTITOKEN_CKPT`); point `MULTITOKEN_CKPT` at the label-aware file above (or rename
+it) to reproduce the reported multi-token numbers.
 
 ---
 
