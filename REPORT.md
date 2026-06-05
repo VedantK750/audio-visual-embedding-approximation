@@ -22,9 +22,9 @@ $$t = [\bar{v} \Vert a] \in \mathbb{R}^{2048}, \qquad \bar{v} = \frac{1}{5}\sum_
 
 i.e. the vision embedding mean-pooled over 5 uniformly sampled frames,
 concatenated with the audio embedding ($\Vert$ denotes concatenation). A student
-$g_\theta$ maps cheaper features to the same space, $s = g_\theta(\cdot) \in
-\mathbb{R}^{2048}$, and is judged by how well $s$ behaves *in the teacher's
-gallery*.
+$g_\theta$ maps cheaper features to the same space,
+$s = g_\theta(\cdot) \in \mathbb{R}^{2048}$, and is judged by how well $s$ behaves
+*in the teacher's gallery*.
 
 ---
 
@@ -132,9 +132,13 @@ $$\mathcal{L}_{\cos} = 1 - \frac{1}{B}\sum_{i=1}^{B} \frac{s_i^\top t_i}{\lVert 
 
 $$\mathcal{L}_{\text{hybrid}} = \alpha \mathcal{L}_{\text{MSE}} + \beta \mathcal{L}_{\cos}, \qquad (\alpha, \beta) = (10, 1).$$
 
-**2.4.4 Label-aware InfoNCE** (multi-token student). With L2-normalized
-$\hat s_i, \hat t_i$ and temperature $\tau$, define logits $z_{ij} = \hat s_i^\top
-\hat t_j / \tau$. Plain InfoNCE treats every off-diagonal pair as a negative,
+**2.4.4 Label-aware InfoNCE** (multi-token student). Let $\hat{s}_i$ and
+$\hat{t}_i$ be the L2-normalized student output and teacher target, and $\tau$ the
+temperature. The batch similarity logits are
+
+$$z_{ij} = \frac{\hat{s}_i^\top \hat{t}_j}{\tau}.$$
+
+Plain InfoNCE treats every off-diagonal pair as a negative,
 which also pushes apart clips of the **same class** and harms semantic structure.
 We therefore mask same-class off-diagonal pairs out of the denominator. With
 labels $y_i$ and the allowed set $\mathcal{N}_i = \{i\} \cup \{j : y_j \ne y_i\}$:
