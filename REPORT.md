@@ -140,8 +140,15 @@ $$z_{ij} = \frac{\hat{s}_i^\top \hat{t}_j}{\tau}.$$
 
 Plain InfoNCE treats every off-diagonal pair as a negative,
 which also pushes apart clips of the **same class** and harms semantic structure.
-We therefore mask same-class off-diagonal pairs out of the denominator. With
-labels $y_i$ and the allowed set $\mathcal{N}_i = \{i\} \cup \{j : y_j \ne y_i\}$:
+We therefore mask same-class off-diagonal pairs out of the denominator. Let $y_i$
+be the class label of clip $i$, and define the allowed candidate set for query $i$
+as
+
+$$\mathcal{N}_i = \{i\} \cup \{\, j : y_j \ne y_i \,\},$$
+
+that is, query $i$'s own target together with every clip of a *different* class;
+same-class clips (other than $i$ itself) are excluded. The masked symmetric
+InfoNCE is then
 
 $$\mathcal{L}_{\text{NCE}} = \frac{1}{2B}\sum_{i=1}^{B}\left[ -\log\frac{e^{z_{ii}}}{\sum_{j\in\mathcal{N}_i} e^{z_{ij}}} -\log\frac{e^{z_{ii}}}{\sum_{j\in\mathcal{N}_i} e^{z_{ji}}} \right].$$
 
