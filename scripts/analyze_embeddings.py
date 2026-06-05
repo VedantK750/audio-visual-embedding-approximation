@@ -26,7 +26,7 @@ from avea.eval.cluster_alignment import analyze_embedding_space, analyze_direct_
 
 DATA_ROOT = "processed_vggsound"
 MLP_CKPT = "checkpoints/mlp/best_mlp_epoch19.pth"
-MULTITOKEN_CKPT = "checkpoints/multitoken/best_multitoken_epoch11.pth"
+MULTITOKEN_CKPT = "checkpoints/multitoken/best_multitoken_epoch29_label_aware_infonce.pth"
 OUT_DIR = "outputs"
 
 

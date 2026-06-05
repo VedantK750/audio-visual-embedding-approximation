@@ -129,10 +129,8 @@ Trained student/teacher checkpoints are available on Google Drive:
 | `best_multitoken_epoch29_non_label_aware_ckpt.pth` | multi-token, plain InfoNCE (ablation) |
 | `best_multitoken_epoch16_val_loss_based.pth` | multi-token, val-loss selection (early ablation) |
 
-Place them under `checkpoints/{mlp,transformer,multitoken}/`. The eval scripts read
-fixed checkpoint names from constants at the top (`MLP_CKPT`, `TRANSFORMER_CKPT`,
-`MULTITOKEN_CKPT`); point `MULTITOKEN_CKPT` at the label-aware file above (or rename
-it) to reproduce the reported multi-token numbers.
+Place them under `checkpoints/{mlp,transformer,multitoken}/`; the eval scripts load
+these filenames by default.
 
 ---
 

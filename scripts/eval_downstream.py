@@ -39,7 +39,7 @@ from avea.eval.linear_probe import linear_probe
 DATA_ROOT = "processed_vggsound"
 MLP_CKPT = "checkpoints/mlp/best_mlp_epoch19.pth"
 TRANSFORMER_CKPT = "checkpoints/transformer/best_transformer_epoch15.pth"
-MULTITOKEN_CKPT = "checkpoints/multitoken/best_multitoken_epoch11.pth"
+MULTITOKEN_CKPT = "checkpoints/multitoken/best_multitoken_epoch29_label_aware_infonce.pth"
 
 
 def main():

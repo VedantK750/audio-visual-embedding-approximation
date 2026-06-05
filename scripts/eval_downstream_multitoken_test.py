@@ -12,7 +12,7 @@ from avea.eval.extraction import gather_test_records, extract_multitoken_student
 from avea.eval.linear_probe import linear_probe
 
 DATA_ROOT = "processed_vggsound"
-CKPT = "checkpoints/multitoken/best_multitoken_epoch11.pth"
+CKPT = "checkpoints/multitoken/best_multitoken_epoch29_label_aware_infonce.pth"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
