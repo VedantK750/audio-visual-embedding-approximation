@@ -18,13 +18,7 @@ space.
 The teacher is **ImageBind-huge**. For each VGGSound clip it produces a 2048-d
 target
 
-$$
-t = [\,\bar{v}\;\Vert\;a\,] \in \mathbb{R}^{2048},
-\qquad
-\bar{v} = \frac{1}{5}\sum_{f=1}^{5} \text{ImageBind}_{\text{vis}}(\text{frame}_f),
-\quad
-a = \text{ImageBind}_{\text{aud}}(\text{audio}),
-$$
+$$t = [\bar{v} \Vert a] \in \mathbb{R}^{2048}, \qquad \bar{v} = \frac{1}{5}\sum_{f=1}^{5} \text{ImageBind}_{\text{vis}}(\text{frame}_f), \qquad a = \text{ImageBind}_{\text{aud}}(\text{audio}).$$
 
 i.e. the vision embedding mean-pooled over 5 uniformly sampled frames,
 concatenated with the audio embedding ($\Vert$ denotes concatenation). A student
@@ -36,12 +30,40 @@ gallery*.
 
 ## 2. Methodology
 
-### 2.1 Data and the privileged target
+### 2.1 Dataset
 
-VGGSound clips, each with 5 frames, one audio track, and a precomputed teacher
-target $t$. Retrieval is reported on the **test split (628 clips)**. The teacher
-target (5-frame + audio) is the **privileged gallery** every query is scored
-against.
+We work with **VGGSound** (Chen et al., 2020), a large-scale audio-visual dataset
+of ~200k ~10-second YouTube clips, each labelled with one of 309 sound classes
+where the sound source is visible in the frame. The full dataset is large and
+many of its classes are visually or acoustically similar, which is noisy for a
+small distillation study, so we use a **curated 15-class subset** chosen to be
+**semantically diverse** (one or two classes per coarse category):
+
+| Category | Classes |
+|---|---|
+| Animal | dog barking, cat meowing, bird chirping/tweeting |
+| Transportation | helicopter, train horning, car engine knocking |
+| Weather | thunder, raining |
+| Nature | ocean burbling, waterfall burbling |
+| Human | people crowd, female speech/woman speaking |
+| Indoor activity | typing on computer keyboard |
+| Music | playing piano, playing acoustic guitar |
+
+The subset is sampled (`scripts/sample_dataset.py`) from the official
+`vggsound.csv` by filtering to these labels and balancing per class: up to **200
+train** and **50 test** clips per class (so a target of $15\times200=3000$ train
+and $15\times50=750$ test). After downloading and extracting frames + audio (some
+YouTube clips are unavailable or fail extraction), the **usable dataset is 2653
+train clips and 628 test clips**. Diversity plus per-class balancing means the
+semantic-retrieval and linear-probe numbers are not dominated by a few large or
+near-duplicate classes.
+
+Each clip provides 5 frames, one 16 kHz audio track, and a precomputed teacher
+target $t$. Retrieval is reported on the **test split (628 clips)**, and the
+teacher target (5-frame + audio) is the **privileged gallery** every query is
+scored against.
+
+VGGSound: <https://www.robots.ox.ac.uk/~vgg/data/vggsound/> (paper and CSV).
 
 A sanity check motivated the whole design. Querying the gallery with only the
 **single middle frame + audio** through ImageBind already gives instance
@@ -86,9 +108,7 @@ give attention real tokens. Keep all 5 per-frame SigLIP 2 embeddings as tokens,
 split the audio into 5 windows encoded by CLAP as tokens, and fuse the joint
 sequence
 
-$$
-[\,\text{CLS},\; v_1,\dots,v_5,\; a_1,\dots,a_5\,]
-$$
+$$[\text{CLS}, v_1, \dots, v_5, a_1, \dots, a_5]$$
 
 with learnable positional and modality-type embeddings through standard
 multi-head self-attention encoder layers. The `CLS` output is projected to
@@ -102,23 +122,15 @@ batch of size $B$.
 
 **2.4.1 Mean squared error** pulls the prediction onto the target vector:
 
-$$
-\mathcal{L}_{\text{MSE}} = \frac{1}{B}\sum_{i=1}^{B}\lVert s_i - t_i\rVert_2^2 .
-$$
+$$\mathcal{L}_{\text{MSE}} = \frac{1}{B}\sum_{i=1}^{B}\lVert s_i - t_i\rVert_2^2.$$
 
 **2.4.2 Cosine distance** matches direction (the geometry retrieval uses):
 
-$$
-\mathcal{L}_{\cos} = 1 - \frac{1}{B}\sum_{i=1}^{B}
-\frac{s_i^\top t_i}{\lVert s_i\rVert\,\lVert t_i\rVert}.
-$$
+$$\mathcal{L}_{\cos} = 1 - \frac{1}{B}\sum_{i=1}^{B} \frac{s_i^\top t_i}{\lVert s_i\rVert \lVert t_i\rVert}.$$
 
 **2.4.3 Hybrid alignment loss** (MLP and cross-attention students):
 
-$$
-\mathcal{L}_{\text{hybrid}} = \alpha\,\mathcal{L}_{\text{MSE}} + \beta\,\mathcal{L}_{\cos},
-\qquad (\alpha,\beta) = (10,\,1).
-$$
+$$\mathcal{L}_{\text{hybrid}} = \alpha \mathcal{L}_{\text{MSE}} + \beta \mathcal{L}_{\cos}, \qquad (\alpha, \beta) = (10, 1).$$
 
 **2.4.4 Label-aware InfoNCE** (multi-token student). With L2-normalized
 $\hat s_i, \hat t_i$ and temperature $\tau$, define logits $z_{ij} = \hat s_i^\top
@@ -127,20 +139,11 @@ which also pushes apart clips of the **same class** and harms semantic structure
 We therefore mask same-class off-diagonal pairs out of the denominator. With
 labels $y_i$ and the allowed set $\mathcal{N}_i = \{i\} \cup \{j : y_j \ne y_i\}$:
 
-$$
-\mathcal{L}_{\text{NCE}} = \frac{1}{2B}\sum_{i=1}^{B}\Bigg[
--\log\frac{e^{z_{ii}}}{\sum_{j\in\mathcal{N}_i} e^{z_{ij}}}
-\;-\;\log\frac{e^{z_{ii}}}{\sum_{j\in\mathcal{N}_i} e^{z_{ji}}}
-\Bigg].
-$$
+$$\mathcal{L}_{\text{NCE}} = \frac{1}{2B}\sum_{i=1}^{B}\left[ -\log\frac{e^{z_{ii}}}{\sum_{j\in\mathcal{N}_i} e^{z_{ij}}} -\log\frac{e^{z_{ii}}}{\sum_{j\in\mathcal{N}_i} e^{z_{ji}}} \right].$$
 
 The full multi-token objective is
 
-$$
-\mathcal{L} = \alpha\,\mathcal{L}_{\text{MSE}} + \beta\,\mathcal{L}_{\cos}
-+ \gamma\,\mathcal{L}_{\text{NCE}},
-\qquad (\alpha,\beta,\gamma,\tau) = (10,\,1,\,5,\,0.07).
-$$
+$$\mathcal{L} = \alpha \mathcal{L}_{\text{MSE}} + \beta \mathcal{L}_{\cos} + \gamma \mathcal{L}_{\text{NCE}}, \qquad (\alpha, \beta, \gamma, \tau) = (10, 1, 5, 0.07).$$
 
 ### 2.5 Training requirements and protocol
 
@@ -160,11 +163,7 @@ $$
 **3.1 Instance retrieval.** Query $i$ is correct only if it retrieves its own
 clip $i$. With rank $r_i$ of the true item,
 
-$$
-\text{R@}K = \frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\,r_i \le K\,],
-\qquad
-\text{MedR} = \mathrm{median}_i\, r_i .
-$$
+$$\text{R@}K = \frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[r_i \le K], \qquad \text{MedR} = \mathrm{median}_i \; r_i.$$
 
 **3.2 Semantic retrieval.** A retrieved item is correct if it shares the query's
 class label (the exact self-clip is excluded). Same $\text{R@}K$ / MedR formula
@@ -233,15 +232,16 @@ clip (relative, not hardware cycles). Measured by `tools/footprint.py`.
 | Cross-attention head | 13.91 M | 27.80 M |
 | Multi-token head | 8.29 M | 9.18 M |
 
-**4.4.2 End-to-end pipelines.**
+**4.4.2 End-to-end pipelines.** "vs teacher" columns are relative to the teacher
+(1 frame + audio) baseline; higher means the student is that many times lighter.
 
-| Pipeline | Params | FLOPs / clip |
-|---|---|---|
-| Teacher (1 frame + audio) | 2.40 G | 441 G |
-| Teacher (5 frame + audio, gallery) | 2.40 G | 1.74 T |
-| MLP student | 242 M | 215 G |
-| Cross-attention student | 543 M | **46 G** |
-| Multi-token student | 537 M | 229 G |
+| Pipeline | Params | Params vs teacher | FLOPs / clip | FLOPs vs teacher |
+|---|---|---|---|---|
+| Teacher (1 frame + audio) | 2.40 G | 1.0x (baseline) | 441 G | 1.0x (baseline) |
+| Teacher (5 frame + audio, gallery) | 2.40 G | 1.0x | 1.74 T | 0.25x (3.9x heavier) |
+| MLP student | 242 M | **9.9x fewer** | 215 G | **2.1x fewer** |
+| Cross-attention student | 543 M | 4.4x fewer | **46 G** | **9.6x fewer** |
+| Multi-token student | 537 M | 4.5x fewer | 229 G | 1.9x fewer |
 
 ImageBind FLOPs are a lower bound (the counter may miss custom ops), which only
 widens the students' advantage.

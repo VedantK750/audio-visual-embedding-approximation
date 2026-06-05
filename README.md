@@ -24,6 +24,24 @@ distance, plus InfoNCE for the multi-token model).
 
 ---
 
+## Dataset
+
+We use a curated 15-class subset of **VGGSound**
+(<https://www.robots.ox.ac.uk/~vgg/data/vggsound/>), a large-scale audio-visual
+dataset of ~200k 10-second YouTube clips across 309 sound classes. The full set
+is large and many classes are near-duplicates, so `scripts/sample_dataset.py`
+picks 15 **semantically diverse** classes (animal, transport, weather, nature,
+human, indoor, music) and balances them at up to 200 train / 50 test clips each
+(target 3000 / 750). After download and frame/audio extraction the usable set is
+**2653 train clips and 628 test clips**.
+
+The 15 classes: dog barking, cat meowing, bird chirping/tweeting, helicopter,
+train horning, car engine knocking, thunder, raining, ocean burbling, waterfall
+burbling, people crowd, female speech, typing on keyboard, playing piano, playing
+acoustic guitar.
+
+---
+
 ## Repository layout
 
 ```
@@ -47,6 +65,7 @@ avea/                          # importable library (no entry points)
     └── linear_probe.py        # LogisticRegression / LinearSVC probe
 
 scripts/                       # runnable entry points (run from repo root)
+├── sample_dataset.py          # pick the 15-class VGGSound subset (subset_{train,test}.csv)
 ├── preprocess_videos.py       # build dataset + ImageBind teacher embeddings
 ├── precompute_features.py     # cache pooled SigLIP 2 + CLAP features
 ├── precompute_tokens.py       # cache multi-token SigLIP 2 + CLAP sequences
@@ -97,7 +116,10 @@ the repository root** so the relative `processed_vggsound` path is found.
 ## Pipeline
 
 ```bash
-# 1. (one-off) build the dataset + ImageBind teacher embeddings
+# 0. (one-off) sample the 15-class VGGSound subset -> subset_{train,test}.csv
+python3 scripts/sample_dataset.py
+
+# 1. (one-off) download clips + extract frames + build ImageBind teacher embeddings
 python3 scripts/preprocess_videos.py
 
 # 2. (one-off) cache student encoder features
