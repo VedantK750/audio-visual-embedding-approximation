@@ -167,6 +167,30 @@ $$\mathcal{L} = \alpha \mathcal{L}_{\text{MSE}} + \beta \mathcal{L}_{\cos} + \ga
   the multi-token instance R@1 from $2.9$ to over $20$ on the same run.
 - Early stopping on the same retrieval score.
 
+### 2.6 Multi-token ablation history
+
+The multi-token student went through several configurations before settling. Each
+row is the best checkpoint of that run on the test split (full metrics in
+Section 4).
+
+| # | Key change | Inst R@1 | Sem R@1 |
+|---|---|---|---|
+| 1 | Plain InfoNCE, checkpoint chosen by validation **loss** | 2.87 | 66.08 |
+| 2 | Plain InfoNCE ($\gamma=5$), checkpoint chosen by validation **R@1** | 23.57 | 69.27 |
+| 3 | **Label-aware** InfoNCE ($\gamma=5$, $\alpha=2$) | 7.01 | 75.64 |
+| 4 | Label-aware InfoNCE ($\gamma=5$, $\alpha=10$), final | 10.19 | 76.59 |
+
+- **1 to 2:** the first run selected its checkpoint by validation loss and was poor
+  (instance 2.9). Selecting by validation retrieval R@1 instead, plus a stronger
+  contrastive term, lifted instance R@1 to 23.6. Plain InfoNCE, however, drove
+  semantic down to 69 by pushing same-class clips apart.
+- **2 to 3:** making the InfoNCE label-aware recovered semantic (69 to 76) but cost
+  instance (24 to 7), because masking same-class negatives removes the within-class
+  separation instance retrieval needs.
+- **3 to 4:** raising the MSE weight $\alpha$ from 2 to 10 restored some instance
+  fidelity (7 to 10) while keeping semantic, since with same-class negatives masked
+  the MSE term becomes the main within-class separator. This is the reported model.
+
 ---
 
 ## 3. Evaluation metrics
