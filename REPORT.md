@@ -362,13 +362,18 @@ task; the wins from the multi-token model are confined to cluster geometry.
   contrastive loss.** Hard same-class negatives give instance up / semantic down;
   fully masking them gives the reverse. A **soft down-weight** $\lambda$ on
   same-class negatives is the obvious next experiment to recover both.
-- The multi-token retrieval, probe, cluster, and alignment numbers should be read
-  as the label-aware InfoNCE configuration; they are best refreshed from a single
-  checkpoint for a strictly like-for-like comparison.
-- FLOPs are relative multiply-add counts; absolute latency depends on hardware and
-  batching.
+- **Compute constraints and dataset scale.** The multi-token model needs unpooled,
+  chunked sequences (5 frame + 5 audio tokens per clip), which sharply increased
+  offline preprocessing and local SSD storage. Under the GPU and timeline
+  constraints, the dataset could not be scaled to its full theoretical size, so
+  the train/test sets are smaller than ideal.
 - Cross-modal retrieval (audio query into an image gallery) is enabled in
   principle by the modality dropout but was not evaluated here.
+- **Perceiver resamplers (future work).** To remove the rigid sequence length and
+  scale to large datasets, replace the multi-token concatenation with a Perceiver
+  architecture: a fixed set of *learnable latent queries* (as in Flamingo / BLIP)
+  cross-attends over an arbitrary number of input tokens, compressing variable
+  length video/audio into a stable size.
 
 ---
 
